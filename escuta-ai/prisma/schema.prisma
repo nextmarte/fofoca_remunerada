@@ -91,6 +91,7 @@ model Transcription {
   // Relacionamentos
   user     User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   segments TranscriptionSegment[]
+  speakers Speaker[]
 
   @@index([userId])
   @@index([status])
@@ -98,17 +99,39 @@ model Transcription {
   @@map("transcriptions")
 }
 
+// Speakers identificados em uma transcrição
+model Speaker {
+  id              String @id @default(cuid())
+  transcriptionId String @map("transcription_id")
+  speakerId       String @map("speaker_id") // ex: "Speaker_1", "Speaker_2"
+  name            String? // Nome identificado ou mencionado
+  characteristics String? @db.Text // JSON: {"tone": "grave", "speed": "normal", ...}
+  confidence      Float? // Confiança da identificação (0-1)
+  firstSegmentId  String? @map("first_segment_id") // Primeiro segmento desse speaker
+  lastSegmentId   String? @map("last_segment_id") // Último segmento desse speaker
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  transcription Transcription @relation(fields: [transcriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([transcriptionId, speakerId])
+  @@index([transcriptionId])
+  @@map("speakers")
+}
+
 // Segmentos com timestamps
 model TranscriptionSegment {
   id              String @id @default(cuid())
   transcriptionId String @map("transcription_id")
+  speakerId       String? @map("speaker_id") // Identificador do speaker (ex: "Speaker_1")
   startTime       Float  @map("start_time") // em segundos
   endTime         Float  @map("end_time")
   text            String @db.Text
+  confidence      Float? // Confiança da transcrição (0-1)
 
   transcription Transcription @relation(fields: [transcriptionId], references: [id], onDelete: Cascade)
 
   @@index([transcriptionId])
+  @@index([speakerId])
   @@map("transcription_segments")
 }
 

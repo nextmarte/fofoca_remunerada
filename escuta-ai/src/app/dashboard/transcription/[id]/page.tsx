@@ -4,19 +4,30 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDate, formatDuration } from "@/lib/utils";
+import { DiarizedTranscript } from "@/components/diarized-transcript";
 
 interface Segment {
   id: string;
   startTime: number;
   endTime: number;
   text: string;
+  speakerId?: string;
+  speaker_name?: string;
+}
+
+interface Speaker {
+  id: string;
+  speakerId: string;
+  name: string;
+  characteristics?: Record<string, unknown>;
+  confidence?: number;
 }
 
 interface TranscriptionData {
   id: string;
   title: string | null;
   text: string | null;
-  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+  status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
   duration: number | null;
   language: string | null;
   wordCount: number | null;
@@ -24,6 +35,8 @@ interface TranscriptionData {
   createdAt: string;
   completedAt: string | null;
   segments: Segment[];
+  speakers?: Speaker[];
+  diarized_segments?: Segment[];
 }
 
 export default function TranscriptionPage({
@@ -38,11 +51,18 @@ export default function TranscriptionPage({
   );
   const [loading, setLoading] = useState(true);
   const [showTimestamps, setShowTimestamps] = useState(false);
+  const [showDiarization, setShowDiarization] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
+  const [reprocessMessage, setReprocessMessage] = useState("");
+  const [selectedLLM, setSelectedLLM] = useState<"openai" | "nebius">(
+    "openai"
+  );
+  const [showLLMSelector, setShowLLMSelector] = useState(false);
 
   const fetchTranscription = async () => {
     try {
-      const res = await fetch(`/api/transcription/${id}`);
+      const res = await fetch(`/api/transcription-with-speakers/${id}`);
       if (!res.ok) {
         router.push("/dashboard/history");
         return;
@@ -83,6 +103,13 @@ export default function TranscriptionPage({
             `[${formatDuration(seg.startTime)}] ${seg.text}`
         )
         .join("\n");
+    } else if (showDiarization && transcription.diarized_segments?.length) {
+      textToCopy = transcription.diarized_segments
+        .map(
+          (seg) =>
+            `[${formatDuration(seg.startTime)}] **${seg.speaker_name}**: ${seg.text}`
+        )
+        .join("\n");
     }
 
     await navigator.clipboard.writeText(textToCopy);
@@ -102,6 +129,13 @@ export default function TranscriptionPage({
             `[${formatDuration(seg.startTime)}] ${seg.text}`
         )
         .join("\n");
+    } else if (showDiarization && transcription.diarized_segments?.length) {
+      content = transcription.diarized_segments
+        .map(
+          (seg) =>
+            `[${formatDuration(seg.startTime)}] **${seg.speaker_name}**: ${seg.text}`
+        )
+        .join("\n");
     }
 
     const blob = new Blob([content], { type: "text/plain" });
@@ -111,6 +145,53 @@ export default function TranscriptionPage({
     a.download = `${transcription.title || "transcricao"}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleReprocessSpeakers = async () => {
+    try {
+      setReprocessing(true);
+      setReprocessMessage("Iniciando reprocessamento...");
+
+      const res = await fetch("/api/reprocess-speakers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcriptionId: id,
+          llmProvider: selectedLLM,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        setReprocessMessage(
+          error.error || "Erro ao reprocessar speakers"
+        );
+        return;
+      }
+
+      setReprocessMessage(
+        `Reprocessamento iniciado com ${selectedLLM === "openai" ? "OpenAI GPT-4o" : "Nebius Qwen3"}! Atualizando em breve...`
+      );
+
+      // Aguardar um pouco e depois fazer polling
+      setTimeout(() => {
+        setReprocessMessage("");
+        const interval = setInterval(() => {
+          fetchTranscription().then(() => {
+            // Parar de fazer polling depois de ter dados atualizados
+            clearInterval(interval);
+          });
+        }, 2000);
+
+        // Limpar interval após 60 segundos
+        setTimeout(() => clearInterval(interval), 60000);
+      }, 1500);
+    } catch (error) {
+      console.error("Erro:", error);
+      setReprocessMessage("Erro ao reprocessar speakers");
+    } finally {
+      setReprocessing(false);
+    }
   };
 
   if (loading) {
@@ -128,6 +209,9 @@ export default function TranscriptionPage({
   const isProcessing =
     transcription.status === "PENDING" ||
     transcription.status === "PROCESSING";
+
+  const hasSpeakers =
+    transcription.speakers && transcription.speakers.length > 0;
 
   return (
     <div className="space-y-6">
@@ -155,7 +239,7 @@ export default function TranscriptionPage({
         </div>
 
         {transcription.status === "COMPLETED" && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={copyToClipboard}
               className="px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors"
@@ -168,6 +252,67 @@ export default function TranscriptionPage({
             >
               ⬇️ Baixar TXT
             </button>
+            {hasSpeakers && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowLLMSelector(!showLLMSelector)}
+                  disabled={reprocessing}
+                  className="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  {reprocessing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Reprocessando...
+                    </>
+                  ) : (
+                    <>
+                      🔄 Reprocessar Speakers
+                    </>
+                  )}
+                </button>
+
+                {showLLMSelector && !reprocessing && (
+                  <div className="absolute top-full right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 z-50 w-64">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
+                      Escolha o modelo de IA:
+                    </p>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          setSelectedLLM("openai");
+                          handleReprocessSpeakers();
+                          setShowLLMSelector(false);
+                        }}
+                        className="w-full text-left px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                      >
+                        <p className="font-medium text-blue-900 dark:text-blue-100">
+                          🤖 OpenAI GPT-4o
+                        </p>
+                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                          Rápido e confiável
+                        </p>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setSelectedLLM("nebius");
+                          handleReprocessSpeakers();
+                          setShowLLMSelector(false);
+                        }}
+                        className="w-full text-left px-3 py-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg text-sm hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
+                      >
+                        <p className="font-medium text-purple-900 dark:text-purple-100">
+                          🧠 Nebius Qwen3-235B
+                        </p>
+                        <p className="text-xs text-purple-700 dark:text-purple-300">
+                          Maior modelo, mais preciso
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -201,6 +346,61 @@ export default function TranscriptionPage({
           </p>
         </div>
       )}
+
+      {transcription.status === "CANCELLED" && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-6">
+          <h3 className="font-semibold text-yellow-800 dark:text-yellow-200">
+            ⏹️ Transcrição cancelada
+          </h3>
+          <p className="text-yellow-600 dark:text-yellow-300 text-sm mt-1">
+            O processamento foi cancelado pelo usuário
+          </p>
+        </div>
+      )}
+
+      {reprocessMessage && (
+        <div className={`rounded-xl p-6 ${
+          reprocessMessage.includes("Erro")
+            ? "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
+            : "bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800"
+        }`}>
+          <p className={`text-sm font-medium ${
+            reprocessMessage.includes("Erro")
+              ? "text-red-700 dark:text-red-200"
+              : "text-blue-700 dark:text-blue-200"
+          }`}>
+            {reprocessMessage}
+          </p>
+        </div>
+      )}
+
+      {/* Diarized Transcript (if speakers are available) */}
+      {transcription.status === "COMPLETED" &&
+        hasSpeakers &&
+        transcription.diarized_segments && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showDiarization}
+                  onChange={(e) => setShowDiarization(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  Mostrar transcrição diarizada
+                </span>
+              </label>
+            </div>
+
+            {showDiarization && (
+              <DiarizedTranscript
+                speakers={transcription.speakers || []}
+                segments={transcription.diarized_segments}
+              />
+            )}
+          </div>
+        )}
 
       {/* Transcription content */}
       {transcription.status === "COMPLETED" && transcription.text && (

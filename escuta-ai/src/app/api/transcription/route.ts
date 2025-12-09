@@ -18,12 +18,20 @@ const ALLOWED_TYPES = [
   "audio/mpeg",
   "audio/mp4",
   "audio/m4a",
+  "audio/x-m4a",
   "audio/wav",
   "audio/webm",
   "audio/ogg",
   "video/mp4",
   "video/webm",
 ];
+
+// Validar tipo de arquivo por tipo MIME ou extensão
+function isValidAudioType(mimeType: string, filename: string): boolean {
+  if (ALLOWED_TYPES.includes(mimeType)) return true;
+  // Validar também por extensão
+  return /\.(mp3|mp4|m4a|wav|webm|ogg|flac)$/i.test(filename);
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -67,9 +75,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Validar tipo
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    if (!isValidAudioType(file.type, file.name)) {
       return NextResponse.json(
-        { error: "Formato de arquivo não suportado" },
+        { error: "Formato de arquivo não suportado. Use: MP3, WAV, M4A, WEBM, OGG ou MP4" },
         { status: 400 }
       );
     }

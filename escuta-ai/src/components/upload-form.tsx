@@ -16,12 +16,23 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
     "audio/mpeg",
     "audio/mp4",
     "audio/m4a",
+    "audio/x-m4a",
     "audio/wav",
     "audio/webm",
     "audio/ogg",
     "video/mp4",
     "video/webm",
   ];
+
+  const validateFileType = (type: string): boolean => {
+    // Aceitar tipos exatos
+    if (allowedTypes.includes(type)) return true;
+    
+    // Aceitar por extensão se type estiver vazio ou genérico
+    if (!type || type === "application/octet-stream") return false;
+    
+    return false;
+  };
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -59,8 +70,11 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
   };
 
   const validateAndSetFile = (file: File) => {
-    // Validar tipo
-    if (!allowedTypes.includes(file.type)) {
+    // Validar tipo - também aceitar por extensão
+    const isValidType = validateFileType(file.type) || 
+      /\.(mp3|mp4|m4a|wav|webm|ogg|flac)$/i.test(file.name);
+    
+    if (!isValidType) {
       alert(
         "Formato não suportado. Use: MP3, WAV, M4A, WEBM, OGG ou MP4"
       );
