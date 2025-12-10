@@ -14,6 +14,12 @@ export async function GET(
 
     const { id } = await params;
 
+    // Buscar dados do usuário para incluir role
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { role: true },
+    });
+
     const transcription = await prisma.transcription.findFirst({
       where: {
         id,
@@ -59,6 +65,7 @@ export async function GET(
       ...transcription,
       speakers: formattedSpeakers,
       diarized_segments: diarizedTranscript,
+      userRole: user?.role || "USER",
     });
   } catch (error) {
     console.error("Erro ao buscar transcrição:", error);

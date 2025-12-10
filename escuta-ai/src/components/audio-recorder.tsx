@@ -33,7 +33,7 @@ export function AudioRecorder({
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const updateAudioLevel = useCallback(() => {
+  const updateAudioLevel = useCallback(function update() {
     if (!analyserRef.current) return;
 
     const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
@@ -42,7 +42,7 @@ export function AudioRecorder({
     const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
     setAudioLevel(average / 255);
 
-    animationRef.current = requestAnimationFrame(updateAudioLevel);
+    animationRef.current = requestAnimationFrame(update);
   }, []);
 
   const startRecording = async () => {

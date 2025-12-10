@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 
 // Route segment config (Next.js 16)
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300; // 5 minutos para uploads grandes
 
 // Desabilita o limite de body padrão do Next.js
 export const fetchCache = "force-no-store";
@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    console.log("[API] Recebendo formData...");
     const formData = await request.formData();
     const file = formData.get("audio") as File | null;
     const title = formData.get("title") as string | null;
@@ -65,6 +66,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    console.log(`[API] Arquivo recebido: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
 
     // Validar tamanho
     if (file.size > MAX_FILE_SIZE) {
@@ -83,11 +86,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Converter arquivo para base64
+    console.log("[API] Convertendo arquivo para buffer...");
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
+    console.log("[API] Convertendo para base64...");
     const audioBase64 = buffer.toString("base64");
+    console.log(`[API] Conversão concluída (${(audioBase64.length / 1024 / 1024).toFixed(2)}MB em base64)`);
 
     // Criar transcrição no banco
+    console.log("[API] Criando registro no banco...");
     const transcription = await prisma.transcription.create({
       data: {
         userId: session.user.id,
@@ -95,8 +102,10 @@ export async function POST(request: NextRequest) {
         status: "PENDING",
       },
     });
+    console.log(`[API] Transcrição criada: ${transcription.id}`);
 
     // Adicionar job na fila
+    console.log("[API] Adicionando job na fila...");
     const job = await addTranscriptionJob({
       transcriptionId: transcription.id,
       audioBase64,
@@ -109,6 +118,8 @@ export async function POST(request: NextRequest) {
       where: { id: transcription.id },
       data: { jobId: job.id },
     });
+
+    console.log(`[API] ✅ Upload concluído com sucesso! Job ${job.id} na fila`);
 
     return NextResponse.json({
       message: "Transcrição iniciada",

@@ -59,6 +59,7 @@ model User {
   emailVerified DateTime? @map("email_verified")
   password      String
   image         String?
+  role          Role      @default(USER)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -67,8 +68,24 @@ model User {
   sessions       Session[]
   transcriptions Transcription[]
   usageQuota     UsageQuota?
+  createdInvitations Invitation[] @relation("CreatedInvitations")
 
   @@map("users")
+}
+
+model Invitation {
+  id              String    @id @default(cuid())
+  email           String?
+  token           String    @unique
+  role            Role      @default(USER)
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String    @map("created_by_user_id")
+
+  createdByUser User @relation("CreatedInvitations", fields: [createdByUserId], references: [id])
+
+  @@map("invitations")
 }
 
 model Transcription {
@@ -137,12 +154,14 @@ model TranscriptionSegment {
 
 // Controle de uso/quotas
 model UsageQuota {
-  id                  String   @id @default(cuid())
-  userId              String   @unique @map("user_id")
-  monthlyMinutesLimit Int      @default(120) @map("monthly_minutes_limit") // 2 horas = 120 minutos
-  usedMinutes         Float    @default(0) @map("used_minutes")
-  totalTranscriptions Int      @default(0) @map("total_transcriptions")
-  lastResetAt         DateTime @default(now()) @map("last_reset_at")
+  id                      String   @id @default(cuid())
+  userId                  String   @unique @map("user_id")
+  monthlyMinutesLimit     Int      @default(120) @map("monthly_minutes_limit") // 2 horas = 120 minutos
+  usedMinutes             Float    @default(0) @map("used_minutes")
+  totalTranscriptions     Int      @default(0) @map("total_transcriptions")
+  diarizationMinutesLimit Int      @default(90) @map("diarization_minutes_limit") // 1h30 = 90 minutos
+  usedDiarizationMinutes  Float    @default(0) @map("used_diarization_minutes")
+  lastResetAt             DateTime @default(now()) @map("last_reset_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -150,6 +169,11 @@ model UsageQuota {
 }
 
 // ========== ENUMS ==========
+enum Role {
+  USER
+  ADMIN
+}
+
 enum TranscriptionStatus {
   PENDING    // Aguardando processamento
   PROCESSING // Em processamento

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AudioRecorder } from "@/components/audio-recorder";
 import { UploadForm } from "@/components/upload-form";
@@ -14,8 +14,27 @@ export default function DashboardPage() {
   const [title, setTitle] = useState("");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const uploadingRef = useRef(false);
+
+  // Debug: detectar remontagem do componente
+  useEffect(() => {
+    console.log("[Dashboard] Componente montado");
+    return () => {
+      console.log("[Dashboard] Componente desmontado - uploading:", uploadingRef.current);
+      if (uploadingRef.current) {
+        console.error("[Dashboard] ⚠️ COMPONENTE DESMONTADO DURANTE UPLOAD!");
+      }
+    };
+  }, []);
 
   const handleUpload = async (file: File | Blob, customTitle?: string) => {
+    // Prevenir duplo submit
+    if (uploadingRef.current) {
+      console.warn("[Dashboard] ⚠️ Upload já em andamento, ignorando duplicata");
+      return;
+    }
+
+    uploadingRef.current = true;
     setUploading(true);
     setError("");
 
@@ -24,23 +43,57 @@ export default function DashboardPage() {
       formData.append("audio", file);
       formData.append("title", customTitle || title || "Nova Transcrição");
 
-      const res = await fetch("/api/transcription", {
-        method: "POST",
-        body: formData,
-      });
+      console.log(`[Dashboard] Iniciando upload de ${(file.size / 1024 / 1024).toFixed(2)}MB...`);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        console.error("[Dashboard] ⏱️ Timeout de 5 minutos excedido!");
+        controller.abort();
+      }, 300000); // 5 minutos
+
+      let res: Response;
+      try {
+        res = await fetch("/api/transcription", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+          keepalive: true, // Manter conexão viva durante HMR
+        });
+      } catch (fetchError) {
+        clearTimeout(timeout);
+        throw fetchError;
+      }
+
+      clearTimeout(timeout);
 
       const data = await res.json();
 
       if (!res.ok) {
         setError(data.error || "Erro ao enviar áudio");
+        setUploading(false);
         return;
       }
 
-      // Redirecionar para a página da transcrição
+      // Upload bem-sucedido, manter loading e navegar
+      console.log("[Dashboard] ✅ Upload concluído, redirecionando...");
       router.push(`/dashboard/transcription/${data.transcriptionId}`);
-    } catch {
-      setError("Erro ao enviar áudio. Tente novamente.");
-    } finally {
+    } catch (error: unknown) {
+      console.error("[Dashboard] ❌ Erro no upload:", error);
+      
+      // Verificar tipo específico de erro
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          setError("Upload cancelado: tempo limite excedido (5 minutos).");
+        } else if (error.message.includes('ECONNRESET') || error.message.includes('aborted')) {
+          setError("Conexão perdida durante upload. O arquivo pode ser muito grande. Tente novamente.");
+        } else {
+          setError(`Erro ao enviar áudio: ${error.message}`);
+        }
+      } else {
+        setError("Erro ao enviar áudio. Tente novamente.");
+      }
+      
+      uploadingRef.current = false;
       setUploading(false);
     }
   };
@@ -49,8 +102,8 @@ export default function DashboardPage() {
     handleUpload(blob, title || `Gravação ${new Date().toLocaleDateString("pt-BR")}`);
   };
 
-  const handleFileUpload = (file: File) => {
-    handleUpload(file, title || file.name.replace(/\.[^/.]+$/, ""));
+  const handleFileUpload = async (file: File) => {
+    await handleUpload(file, title || file.name.replace(/\.[^/.]+$/, ""));
   };
 
   return (
@@ -78,8 +131,9 @@ export default function DashboardPage() {
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            disabled={uploading}
             placeholder="Ex: Reunião de equipe, Aula de história..."
-            className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+            className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
 
@@ -87,7 +141,8 @@ export default function DashboardPage() {
         <div className="flex border-b border-gray-200 dark:border-gray-700">
           <button
             onClick={() => setActiveTab("record")}
-            className={`flex-1 py-4 text-center font-medium transition-colors ${
+            disabled={uploading}
+            className={`flex-1 py-4 text-center font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               activeTab === "record"
                 ? "text-blue-500 border-b-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                 : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
@@ -97,7 +152,8 @@ export default function DashboardPage() {
           </button>
           <button
             onClick={() => setActiveTab("upload")}
-            className={`flex-1 py-4 text-center font-medium transition-colors ${
+            disabled={uploading}
+            className={`flex-1 py-4 text-center font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               activeTab === "upload"
                 ? "text-blue-500 border-b-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                 : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"

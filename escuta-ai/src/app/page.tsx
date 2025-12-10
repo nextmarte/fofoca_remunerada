@@ -43,8 +43,8 @@ export default function Home() {
             </span>
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-300 mb-8">
-            Grave ou faça upload de áudios de até 1 hora e obtenha transcrições
-            precisas usando a tecnologia Whisper da OpenAI.
+            Grave ou faça upload de áudios e obtenha transcrições
+            precisas
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link

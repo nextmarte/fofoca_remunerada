@@ -41,6 +41,14 @@ export default async function DashboardLayout({
               >
                 Histórico
               </Link>
+              {session.user?.role === "ADMIN" && (
+                <Link
+                  href="/admin/users"
+                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium"
+                >
+                  Admin
+                </Link>
+              )}
             </nav>
 
             <div className="flex items-center gap-4">
@@ -92,6 +100,14 @@ export default async function DashboardLayout({
           >
             Histórico
           </Link>
+          {session.user?.role === "ADMIN" && (
+            <Link
+              href="/admin/users"
+              className="flex-1 py-3 text-center text-indigo-600 dark:text-indigo-400 font-medium border-b-2 border-transparent hover:border-indigo-500"
+            >
+              Admin
+            </Link>
+          )}
         </div>
       </nav>
 

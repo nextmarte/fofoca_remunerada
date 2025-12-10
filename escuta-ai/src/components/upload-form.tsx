@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 
 interface UploadFormProps {
-  onUploadComplete: (file: File) => void;
+  onUploadComplete: (file: File) => Promise<void> | void;
 }
 
 export function UploadForm({ onUploadComplete }: UploadFormProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const allowedTypes = [
+  const allowedTypes = useMemo(() => [
     "audio/mp3",
     "audio/mpeg",
     "audio/mp4",
@@ -22,9 +25,23 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
     "audio/ogg",
     "video/mp4",
     "video/webm",
-  ];
+  ], []);
 
-  const validateFileType = (type: string): boolean => {
+  // Proteger contra fechamento/navegação durante upload
+  useEffect(() => {
+    if (!uploading) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+      return "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [uploading]);
+
+  const validateFileType = useCallback((type: string): boolean => {
     // Aceitar tipos exatos
     if (allowedTypes.includes(type)) return true;
     
@@ -32,7 +49,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
     if (!type || type === "application/octet-stream") return false;
     
     return false;
-  };
+  }, [allowedTypes]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -51,25 +68,7 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      validateAndSetFile(files[0]);
-    }
-  }, []);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      validateAndSetFile(files[0]);
-    }
-  };
-
-  const validateAndSetFile = (file: File) => {
+  const validateAndSetFile = useCallback((file: File) => {
     // Validar tipo - também aceitar por extensão
     const isValidType = validateFileType(file.type) || 
       /\.(mp3|mp4|m4a|wav|webm|ogg|flac)$/i.test(file.name);
@@ -88,12 +87,48 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
     }
 
     setSelectedFile(file);
+  }, [validateFileType]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (uploading) return;
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      validateAndSetFile(files[0]);
+    }
   };
 
-  const handleSubmit = () => {
-    if (selectedFile) {
-      onUploadComplete(selectedFile);
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (uploading) return;
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      validateAndSetFile(files[0]);
+    }
+  }, [validateAndSetFile, uploading]);
+
+  const handleSubmit = async () => {
+    // Prevenir duplo submit
+    if (!selectedFile || uploading || isSubmitting) {
+      console.warn("[UploadForm] Submit bloqueado - uploading:", uploading, "isSubmitting:", isSubmitting);
+      return;
+    }
+
+    console.log("[UploadForm] Iniciando submit...");
+    setIsSubmitting(true);
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      await onUploadComplete(selectedFile);
       setSelectedFile(null);
+      console.log("[UploadForm] ✅ Submit concluído");
+    } catch (error) {
+      console.error("[UploadForm] ❌ Erro no upload:", error);
+    } finally {
+      setIsSubmitting(false);
+      setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -184,19 +219,37 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
                 e.stopPropagation();
                 setSelectedFile(null);
               }}
-              className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+              disabled={uploading}
+              className="p-2 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
               </svg>
             </button>
           </div>
+          
+          {/* Barra de progresso durante upload */}
+          {uploading && (
+            <div className="mt-4">
+              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+                <span>Enviando...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-blue-600 h-2 transition-all duration-300 animate-pulse"
+                  style={{ width: `${uploadProgress || 10}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           <button
             onClick={handleSubmit}
-            className="w-full mt-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors"
+            disabled={uploading || isSubmitting}
+            className="w-full mt-4 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-blue-400"
           >
-            Iniciar Transcrição
+            {uploading || isSubmitting ? "Enviando..." : "Iniciar Transcrição"}
           </button>
         </div>
       )}

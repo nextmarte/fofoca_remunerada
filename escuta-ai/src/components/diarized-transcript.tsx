@@ -101,33 +101,32 @@ export function DiarizedTranscript({
         </div>
       )}
 
-      {/* Transcrição diarizada */}
-      <div className="space-y-3">
-        {segments.map((segment, idx) => {
+      {/* Transcrição em formato de chat */}
+      <div className="space-y-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        {segments.map((segment) => {
           const speakerIndex = speakerIndexMap.get(segment.speakerId) ?? 0;
           const speaker = speakers.find((s) => s.speakerId === segment.speakerId);
+          const speakerName = speaker?.name || segment.speakerId || "Desconhecido";
+          const colorClass = getSpeakerColor(speakerIndex);
 
           return (
-            <div
-              key={segment.id}
-              className={`p-4 rounded-lg border-l-4 ${getSpeakerColor(speakerIndex)}`}
-            >
-              <div className="flex items-start justify-between gap-4 mb-2">
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-sm">
-                    {speaker?.name || segment.speaker_name || "Unknown"}
-                  </div>
-                  <div className="text-xs opacity-75 mt-1">
-                    {formatTime(segment.startTime)} - {formatTime(segment.endTime)}
-                  </div>
-                </div>
-                {segment.confidence && (
-                  <div className="text-xs bg-white dark:bg-gray-800 px-2 py-1 rounded opacity-70">
-                    {Math.round(segment.confidence * 100)}%
-                  </div>
-                )}
+            <div key={segment.id} className="flex gap-3 items-start">
+              {/* Timestamp */}
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 w-12 flex-shrink-0 text-right">
+                {formatTime(segment.startTime)}
               </div>
-              <p className="text-sm leading-relaxed">{segment.text}</p>
+              
+              {/* Message bubble */}
+              <div className="flex-1">
+                <div className={`inline-block max-w-[85%] rounded-lg px-4 py-2 border ${colorClass}`}>
+                  <div className="font-semibold text-sm mb-1">
+                    {speakerName}
+                  </div>
+                  <p className="text-sm leading-relaxed">
+                    {segment.text}
+                  </p>
+                </div>
+              </div>
             </div>
           );
         })}

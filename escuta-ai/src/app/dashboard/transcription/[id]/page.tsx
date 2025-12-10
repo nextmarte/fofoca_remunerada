@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDate, formatDuration } from "@/lib/utils";
@@ -37,6 +37,7 @@ interface TranscriptionData {
   segments: Segment[];
   speakers?: Speaker[];
   diarized_segments?: Segment[];
+  userRole?: "USER" | "ADMIN";
 }
 
 export default function TranscriptionPage({
@@ -52,15 +53,15 @@ export default function TranscriptionPage({
   const [loading, setLoading] = useState(true);
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [showDiarization, setShowDiarization] = useState(false);
+  const [speakersProcessing, setSpeakersProcessing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
   const [reprocessMessage, setReprocessMessage] = useState("");
-  const [selectedLLM, setSelectedLLM] = useState<"openai" | "nebius">(
-    "openai"
-  );
-  const [showLLMSelector, setShowLLMSelector] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<"pyannote" | "openai" | "nebius">("pyannote");
 
-  const fetchTranscription = async () => {
+  const isAdmin = transcription?.userRole === "ADMIN";
+
+  const fetchTranscription = useCallback(async () => {
     try {
       const res = await fetch(`/api/transcription-with-speakers/${id}`);
       if (!res.ok) {
@@ -68,28 +69,44 @@ export default function TranscriptionPage({
         return;
       }
       const data = await res.json();
+      
+      // Check if transcription is completed but speakers are not yet identified
+      if (data.status === "COMPLETED" && data.segments?.length > 0 && (!data.speakers || data.speakers.length === 0)) {
+        setSpeakersProcessing(true);
+      } else if (data.speakers && data.speakers.length > 0) {
+        setSpeakersProcessing(false);
+      }
+      
       setTranscription(data);
     } catch (error) {
       console.error("Erro ao buscar transcrição:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, router]);
 
   useEffect(() => {
     fetchTranscription();
-  }, [id]);
+  }, [fetchTranscription]);
 
-  // Polling para transcrições em andamento
+  // Polling para transcrições em andamento ou processamento de speakers
   useEffect(() => {
     if (
       transcription?.status === "PENDING" ||
-      transcription?.status === "PROCESSING"
+      transcription?.status === "PROCESSING" ||
+      speakersProcessing
     ) {
       const interval = setInterval(fetchTranscription, 3000);
       return () => clearInterval(interval);
     }
-  }, [transcription?.status]);
+  }, [transcription?.status, speakersProcessing, fetchTranscription]);
+
+  // Auto-enable diarization if speakers are present
+  useEffect(() => {
+    if (transcription?.speakers && transcription.speakers.length > 0) {
+      setShowDiarization(true);
+    }
+  }, [transcription]);
 
   const copyToClipboard = async () => {
     if (!transcription?.text) return;
@@ -152,12 +169,15 @@ export default function TranscriptionPage({
       setReprocessing(true);
       setReprocessMessage("Iniciando reprocessamento...");
 
+      // Admins podem escolher provider, usuários comuns o backend decide
+      const provider = isAdmin ? selectedProvider : undefined;
+
       const res = await fetch("/api/reprocess-speakers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transcriptionId: id,
-          llmProvider: selectedLLM,
+          llmProvider: provider,
         }),
       });
 
@@ -169,8 +189,11 @@ export default function TranscriptionPage({
         return;
       }
 
+      const data = await res.json();
+      const providerUsed = data.llmProvider || "Nebius";
+      const providerName = providerUsed === "pyannote" ? "Pyannote" : providerUsed === "nebius" ? "Nebius" : "OpenAI";
       setReprocessMessage(
-        `Reprocessamento iniciado com ${selectedLLM === "openai" ? "OpenAI GPT-4o" : "Nebius Qwen3"}! Atualizando em breve...`
+        `Reprocessamento iniciado com ${providerName}! Atualizando em breve...`
       );
 
       // Aguardar um pouco e depois fazer polling
@@ -252,10 +275,21 @@ export default function TranscriptionPage({
             >
               ⬇️ Baixar TXT
             </button>
-            {hasSpeakers && (
-              <div className="relative">
+            {hasSpeakers && isAdmin && (
+              <div className="flex items-center gap-2">
+                {/* Selector de provider - apenas para admins */}
+                <select
+                  value={selectedProvider}
+                  onChange={(e) => setSelectedProvider(e.target.value as "pyannote" | "openai" | "nebius")}
+                  className="px-3 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium"
+                  disabled={reprocessing}
+                >
+                  <option value="pyannote">🎙️ Pyannote</option>
+                  <option value="openai">🤖 OpenAI GPT-4o</option>
+                  <option value="nebius">⚡ Nebius Qwen</option>
+                </select>
                 <button
-                  onClick={() => setShowLLMSelector(!showLLMSelector)}
+                  onClick={handleReprocessSpeakers}
                   disabled={reprocessing}
                   className="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                 >
@@ -266,51 +300,10 @@ export default function TranscriptionPage({
                     </>
                   ) : (
                     <>
-                      🔄 Reprocessar Speakers
+                      🔄 Reprocessar
                     </>
                   )}
                 </button>
-
-                {showLLMSelector && !reprocessing && (
-                  <div className="absolute top-full right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 z-50 w-64">
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">
-                      Escolha o modelo de IA:
-                    </p>
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => {
-                          setSelectedLLM("openai");
-                          handleReprocessSpeakers();
-                          setShowLLMSelector(false);
-                        }}
-                        className="w-full text-left px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-                      >
-                        <p className="font-medium text-blue-900 dark:text-blue-100">
-                          🤖 OpenAI GPT-4o
-                        </p>
-                        <p className="text-xs text-blue-700 dark:text-blue-300">
-                          Rápido e confiável
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setSelectedLLM("nebius");
-                          handleReprocessSpeakers();
-                          setShowLLMSelector(false);
-                        }}
-                        className="w-full text-left px-3 py-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg text-sm hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
-                      >
-                        <p className="font-medium text-purple-900 dark:text-purple-100">
-                          🧠 Nebius Qwen3-235B
-                        </p>
-                        <p className="text-xs text-purple-700 dark:text-purple-300">
-                          Maior modelo, mais preciso
-                        </p>
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -374,36 +367,42 @@ export default function TranscriptionPage({
         </div>
       )}
 
+      {/* Speaker identification processing indicator */}
+      {transcription.status === "COMPLETED" && speakersProcessing && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div>
+              <h3 className="font-semibold text-blue-800 dark:text-blue-200">
+                Identificando interlocutores...
+              </h3>
+              <p className="text-blue-600 dark:text-blue-300 text-sm">
+                Analisando a conversa para identificar os falantes
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Diarized Transcript (if speakers are available) */}
       {transcription.status === "COMPLETED" &&
         hasSpeakers &&
         transcription.diarized_segments && (
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showDiarization}
-                  onChange={(e) => setShowDiarization(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
-                />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                  Mostrar transcrição diarizada
-                </span>
-              </label>
-            </div>
-
-            {showDiarization && (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                Transcrição com Interlocutores
+              </h3>
               <DiarizedTranscript
                 speakers={transcription.speakers || []}
                 segments={transcription.diarized_segments}
               />
-            )}
+            </div>
           </div>
         )}
 
-      {/* Transcription content */}
-      {transcription.status === "COMPLETED" && transcription.text && (
+      {/* Transcription content - Show immediately when completed, even if speakers are still processing */}
+      {transcription.status === "COMPLETED" && transcription.text && (speakersProcessing || !hasSpeakers) && (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           {/* Toggle timestamps */}
           {transcription.segments.length > 0 && (
